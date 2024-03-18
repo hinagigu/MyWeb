@@ -78,4 +78,41 @@ auto HttpMessageFactory::createHttpRequest(std::string &str)
   return req;
 }
 
+auto HttpMessageFactory::createHttpResponse(std::string &str)
+    -> std::unique_ptr<HttpResponse> {
+  std::istringstream iss(str);
+  std::string http_version, status_code_str, reason_phrase;
+  std::getline(iss, http_version, ' ');
+  std::getline(iss, status_code_str, ' ');
+  std::getline(iss, reason_phrase);
+
+  int status_code = std::stoi(status_code_str);
+  HTTP_STATUS http_status = static_cast<HTTP_STATUS>(status_code);
+
+  std::unique_ptr<HttpResponse> response =
+      std::make_unique<HttpResponse>(http_status, http_version);
+
+  std::string line;
+  while (std::getline(iss, line) && !line.empty()) {
+    std::smatch match;
+    std::regex re(R"(^(\S+):\s*(.*)$)");
+    if (std::regex_match(line, match, re)) {
+      auto header_key = header_string_to_enum(match[1].str());
+      if (header_key != HEADER_NOT_SUPPORT) {
+        response->add_header(header_key, match[2].str());
+      }
+    } else if (line == "\r\n") { // End of headers
+      break;
+    }
+  }
+
+  std::getline(iss, line);         // Discard the ending \r\n
+  std::stringstream ss(iss.str()); // Rest is the optional response body
+  std::string body((std::istreambuf_iterator<char>(ss)),
+                   std::istreambuf_iterator<char>());
+  response->set_body(body);
+
+  return response;
+}
+}
 } // namespace HTTP

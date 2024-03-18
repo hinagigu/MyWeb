@@ -34,6 +34,7 @@ enum HTTP_STATUS {
   Not_Implemented = 501,
   Status_NOT_SUPPORT
 };
+
 static const std::vector<std::pair<const char *, HTTP::HTTP_METHOD>>
     methodStrings = {{"GET", HTTP::GET},
                      {"POST", HTTP::POST},

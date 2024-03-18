@@ -1,0 +1,877 @@
+--- Folder Structure ---
+CMakeLists.txt
+[include]
+    ├── HttpBase.h
+    ├── HttpMessageFactory.h
+    ├── HttpRequest.h
+    ├── SafeQueue.h
+    ├── ServerBase.h
+    └── ThreadPool.h
+[src]
+    ├── HttpMessageFactory.cpp
+    ├── HttpRequest.cpp
+    ├── ServerBase.cpp
+    └── main.cpp
+[tests]
+    ├── CMakeLists.txt
+    ├── HttpMessageFactory_test.cpp
+    └── ThreadPool_test.cpp
+
+--- File Contents ---
+
+--- File: CMakeLists.txt ---
+cmake_minimum_required(VERSION 3.10)
+
+# 项目名称
+project(ServerProject)
+
+# 设置C++标准
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+# 指定源文件目录
+aux_source_directory(src SRC_LIST) # 如果不使用aux_source_directory，也可以直接指定文件名
+
+
+# 或者手动添加单个源文件
+# set(SRC_LIST src/Server.cpp)
+
+# 添加头文件目录到包含路径
+include_directories(include)
+
+# 添加可执行文件目标
+add_executable(Server ${SRC_LIST})
+
+set(FAC_LIB src/HttpMessageFactory.cpp)
+
+add_library(FAC_LIBS ${FAC_LIB})
+# 确保include目录对于Server目标可见
+target_include_directories(Server PRIVATE include)
+
+# 如果需要链接库，添加类似下面的语句
+# target_link_libraries(Server ${REQUIRED_LIBRARIES})
+
+
+# 允许用户选择是否构建测试
+option(BUILD_TESTING "Build the unit tests." ON)
+
+# 添加子目录，同时考虑是否要构建测试
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
+# 如果构建测试，则添加对GoogleTest的查找和安装（如果还未找到）
+if(BUILD_TESTING)
+    find_package(GTest REQUIRED)
+    include_directories(${GTEST_INCLUDE_DIRS})
+endif()
+
+--- File: include/HttpBase.h ---
+#include <array>
+#include <iostream>
+#include <map>
+#include <ostream>
+#include <sstream>
+#include <utility>
+#include <vector>
+#pragma once
+namespace HTTP {
+template <typename T> struct EnumClassHash {
+  std::size_t operator()(T t) const { return static_cast<std::size_t>(t); }
+};
+enum HTTP_VERSION { HTTP_10 = 0, HTTP_11, VERSION_NOT_SUPPORT };
+enum HTTP_METHOD { GET = 0, POST, PUT, DELETE, METHOD_NOT_SUPPORT };
+enum HTTP_HEADER {
+  Host = 0,
+  User_Agent,
+  Connection,
+  Accept_Encoding,
+  Accept_Language,
+  Accept,
+  Cache_Control,
+  Upgrade_Insecure_Requests,
+  HEADER_NOT_SUPPORT
+};
+enum HTTP_STATUS {
+  OK = 200,
+  Moved_Permanently = 301,
+  Bad_Request = 400,
+  Unauthorized = 401,
+  Forbidden = 403,
+  Not_Found = 404,
+  Internal_Server_Error = 500,
+  Not_Implemented = 501,
+  Status_NOT_SUPPORT
+};
+static const std::vector<std::pair<const char *, HTTP::HTTP_METHOD>>
+    methodStrings = {{"GET", HTTP::GET},
+                     {"POST", HTTP::POST},
+                     {"PUT", HTTP::PUT},
+                     {"DELETE", HTTP::DELETE}};
+// HTTP_HEADER对应的字符串数组
+static const std::vector<std::pair<const char *, HTTP_HEADER>> headerStrings =
+    {{"Host", Host},
+      {"User-Agent", User_Agent},
+      {"Connection", Connection},
+      {"Accept-Encoding", Accept_Encoding},
+      {"Accept-Language", Accept_Language},
+      {"Accept", Accept},
+      {"Cache-Control", Cache_Control},
+      {"Upgrade-Insecure-Requests", Upgrade_Insecure_Requests}};
+
+inline auto method_string_to_enum(const std::string_view &method_str)
+    -> HTTP_METHOD {
+  for (const auto &[str, method] : methodStrings) {
+    if (method_str == str) {
+      return method;
+    }
+  }
+  return METHOD_NOT_SUPPORT;
+}
+
+inline auto header_string_to_enum(const std::string_view &header_str)
+    -> HTTP_HEADER {
+  for (const auto &[str, header] : headerStrings) {
+    if (header_str == str) {
+      return header;
+    }
+  }
+  return HEADER_NOT_SUPPORT;
+}
+
+} // namespace HTTP
+
+
+--- File: include/HttpMessageFactory.h ---
+// 实现一个工厂类来管理Request和Response
+#include "HttpBase.h"
+#include "HttpRequest.h"
+#include <memory>
+#include <mutex>
+namespace HTTP {
+class HttpMessageFactory {
+public:
+  // 给出一个创建factory的方法
+  static auto getInstance() ->std::unique_ptr<HttpMessageFactory>& {
+    static std::once_flag s_flag;
+    std::call_once(s_flag, [&]() {instance_.reset(new HttpMessageFactory()); });
+    return instance_;
+  }
+  void hello_func() { std::cout << "hello func" << std::endl; }
+  void hello_func1();
+  // 可以添加创建HttpRequest的方法
+  auto createHttpRequest(std::string &str)
+      -> std::unique_ptr<HttpRequest>;
+  // 可以添加创建HttpResponse的方法
+  // static auto createHttpResponse(HTTP_STATUS status_code, const std::string&
+  // body = "")->std::unique_ptr<HttpResponse>;
+  ~HttpMessageFactory() = default;
+
+
+private:
+  // 防止实例化
+  HttpMessageFactory() = default;
+  static std::unique_ptr<HttpMessageFactory> instance_;
+  HttpMessageFactory(const HttpMessageFactory &) = delete;
+  HttpMessageFactory &operator=(const HttpMessageFactory &) = delete;
+  HttpMessageFactory(const HttpMessageFactory &&) = delete;
+  HttpMessageFactory &operator=(const HttpMessageFactory &&) = delete;
+
+};
+// 实现工厂类
+
+} // namespace HTTP
+
+--- File: include/HttpRequest.h ---
+#include "HttpBase.h"
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
+# pragma once
+namespace HTTP {
+class HttpRequest {
+public:
+  using header_map =
+      std::unordered_map<HTTP_HEADER, std::string, EnumClassHash<HTTP_HEADER>>;
+  HttpRequest(HttpRequest &&other) = default;
+  HttpRequest &operator=(HttpRequest &&other) = default;
+  HttpRequest(const HttpRequest &other) = default;
+  HttpRequest &operator=(const HttpRequest &other) = default;
+    HttpRequest(const HTTP_METHOD& method, const std::string& version, const std::string& path)
+        : method_(method), version_(version), path_(path) {}
+
+  HttpRequest() = delete;
+  ~HttpRequest() = default;
+  auto get_method() const -> HTTP_METHOD { return method_; }
+  std::string get_version() const { return version_; }
+  header_map get_headers() const { return headers_; }
+  void add_header(const HTTP_HEADER &key, const std::string &value) {
+    headers_.insert({key, value});
+  }
+  auto get_header(const HTTP_HEADER &key) const -> std::string {
+    if (!has_header(key)) {
+      throw std::runtime_error("header not found");
+    }
+    return headers_.at(key);
+  }
+  auto get_header(const HTTP_HEADER &key,
+                  const std::string &default_value) const -> std::string {
+    if (!has_header(key)) {
+      return default_value;
+    }
+    return headers_.at(key);
+  }
+  auto has_header(const HTTP_HEADER key) const -> bool{return headers_.contains(key);}
+  void set_body(const std::string &body) { body_ = body; }
+  std::string get_body() const { return body_; }
+  auto get_path() const -> std::string { return path_; }
+private:
+  HTTP::HTTP_METHOD method_;
+  std::string version_;
+  header_map headers_;
+  std::string body_;
+  std::string path_;
+};
+
+} // namespace HTTP
+
+--- File: include/SafeQueue.h ---
+#include <iostream>
+#include <mutex>
+#include <queue>
+#include <shared_mutex>
+#include <thread>
+template <typename T> class SafeQueue {
+private:
+  std::queue<T> m_queue;
+
+  //   std::mutex m_mutex; // 访问互斥信号量
+  std::shared_mutex m_mutex; // 访问互斥信号量
+
+public:
+  SafeQueue() {}
+  SafeQueue(SafeQueue &&other) {}
+  ~SafeQueue() {}
+
+  bool empty() // 返回队列是否为空
+  {
+    // std::unique_lock<std::mutex> lock(m_mutex);
+    // std::lock_guard<std::mutex> lock(m_mutex);
+    std::cout<<"querying  empty" << std::endl;
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    return m_queue.empty();
+  }
+
+  int size() {
+    // std::unique_lock<std::mutex> lock(m_mutex);
+    std::cout<<"querying  size" << std::endl;
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    return m_queue.size();
+  }
+
+  // 队列添加元素
+  void push(T &t) {
+    // std::unique_lock<std::mutex> lock(m_mutex);
+    std::cout<<"pushing" << std::endl;
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+
+    m_queue.emplace(t);
+  }
+  void push(T &&t) {
+    // std::unique_lock<std::mutex> lock(m_mutex);
+    std::cout<<"pushing rl" << std::endl;
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+
+    m_queue.push(std::move(t));
+  } // 接受一个右值引用
+  // 队列取出元素
+  bool pop(T &t) {
+    // std::unique_lock<std::mutex> lock(m_mutex); // 队列加锁
+    std::unique_lock<std::shared_mutex> lock(
+        m_mutex); // lockguard为普通互斥锁使用的
+    std::cout<<"popping" << std::endl;
+    if (m_queue.empty()) {
+      std::cout << "queue is empty" << std::endl;
+      return false;
+    }
+    t = std::move(
+        m_queue.front()); // 取出队首元素，返回队首元素值，并进行右值引用
+    m_queue.pop(); // 弹出入队的第一个元素​
+    return true;
+  }
+
+  T front() {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    std::cout<<"front" << std::endl;
+    if (m_queue.empty()) {
+      throw std::runtime_error("queue is empty");
+    }
+    return m_queue.front();
+  }
+};
+
+--- File: include/ServerBase.h ---
+// 先定义一个TCP_server
+// include
+// socket相关文件夹
+#include <netinet/in.h>
+#include <optional>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <thread>
+#include <vector>
+
+// 第一个是socket 第二个是inet_addr
+#pragma once
+#define MAXEVENTS 1024
+#define BUF_SIZE 1024
+class ServerBase {
+public:
+  ServerBase(int port);
+  ~ServerBase();
+  void start();
+
+private:
+  epoll_event event_;
+  epoll_event events_[MAXEVENTS];
+  struct sockaddr_in server_addr_;
+  int socket_fd_;
+  int epoll_fd_;
+  std::optional<std::thread> background_thread_;
+  std::vector<std::thread> handle_threads_;
+  std::vector<int> client_socket_fds_;
+  bool stop_work_{false};
+  socklen_t len_;
+
+  socklen_t get_client_addr_(struct sockaddr *addr, socklen_t len);
+  void bind_socket();
+  void listen_socket();
+  void accept_socket(struct sockaddr_in *client_addr);
+  void create_epoll();
+  void work_thread();
+  void handle_client(int client_socket);
+
+  // 获取客户端的地址信息
+
+};
+
+--- File: include/ThreadPool.h ---
+// 实现一个线程池
+#include "SafeQueue.h"
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+class ThreadPool {
+public:
+  ThreadPool(int thread_num);
+  ~ThreadPool();
+  template <typename F, typename... Args>
+  auto submit(F &&t, Args &&...args) -> std::future<
+      decltype(t(args...))>; // 模板参数列表配合可变参数列表,实现参数转发
+  // 写一个工作函数，从线程池中取出一个任务，然后开始运行
+  void startwork();
+
+private:
+  bool isStop_{false};
+  SafeQueue<std::function<void()>> tasks;
+  std::mutex mutex;
+  std::condition_variable cond;
+  std::vector<std::thread> work_threads;
+};
+
+// 线程池的调度任务是绑定好的task，这样就不用在每个线程中都重新绑定一次
+template <typename F, typename... Args>
+auto ThreadPool::submit(F &&t, Args &&...args)
+    -> std::future<decltype(t(args...))> {
+  using ret_type = decltype(t(args...));
+  auto task = std::make_shared<std::packaged_task<ret_type()>>(std::bind(
+      std::forward<F>(t),
+      std::forward<Args>(args)...)); // 注意 这里需要使用forward实现完美转发
+  // 这里task是智能指针，当task被销毁时，任务也会被销毁
+  std::function<void()> warpper_func = [task]() { (*task)(); }; // 这里进行一次再封装，若直接push *task，则类型是不匹配的
+  tasks.push(warpper_func); 
+  std::unique_lock<std::mutex> lock(mutex);
+  cond.notify_one();
+  return task->get_future();
+}
+inline void ThreadPool::startwork() {
+  while (!isStop_) {
+    // 获取任务
+    // 获取任务的时候，是在安全队列的，所以没问题，但是要怎么样获取？
+    // 任务的返回类型不确定? 这里经过封装，所有任务都表现为void(),无参无返回
+    std::function<void()> task;
+    // 获取任务的时候，是阻塞的，因为队列中没有任务，所以一直阻塞
+    if (tasks.empty()) {
+      std::unique_lock<std::mutex> lock(mutex); // 防止多个队列同时阻塞
+      std::cout<<"before block"<<std::endl;
+      cond.wait(lock, [this]() { return !tasks.empty() || isStop_; });
+      std::cout<<"after block"<<std::endl;
+    }
+    if (isStop_) {
+      break;
+    } // 先检查是否是因为关闭唤醒了它
+    bool popres = tasks.pop(task);
+    task(); // 执行任务
+  }
+} // 调用一个线程工作
+inline ThreadPool::ThreadPool(int thread_num) {
+  for (int i = 0; i < thread_num; ++i) {
+    work_threads.emplace_back([this]() { startwork(); });
+  }
+  // 启动线程池
+}
+
+inline ThreadPool::~ThreadPool() {
+  std::cout<<"ThreadPool::~ThreadPool"<<std::endl;
+  isStop_ = true;
+  cond.notify_all(); // 唤起所有线程并等待它们结束
+  for (auto &t : work_threads) {
+    if (t.joinable()) {
+      t.join();
+    }
+  }
+  // 等待所有线程退出
+}
+
+
+--- File: src/HttpMessageFactory.cpp ---
+#include "HttpMessageFactory.h"
+#include "HttpBase.h"
+#include "HttpRequest.h"
+#include <algorithm>
+#include <cstddef>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <string_view>
+namespace HTTP {
+std::unique_ptr<HttpMessageFactory> HttpMessageFactory::instance_{nullptr};
+// 必须显示初始化，否则编译错误
+void HttpMessageFactory::hello_func1() {
+  std::cout<< "HttpMessageFactory::hello_func1()" << std::endl;
+}
+std::string_view ltrim(std::string_view sv) {
+  sv.remove_prefix(sv.find_first_not_of(' '));
+  return sv;
+}
+
+auto HttpMessageFactory::createHttpRequest(std::string &str)
+    -> std::unique_ptr<HttpRequest> {
+  std::istringstream iss(str);
+  std::string first_line;
+  std::getline(iss, first_line);
+
+  // 使用std::string_view解析第一行
+  std::string_view first_line_view(first_line);
+  std::size_t space_pos1 = first_line_view.find(' ');
+  if (space_pos1 == std::string_view::npos) {
+    throw std::runtime_error("Invalid request format: Method not found");
+  }
+  std::size_t space_pos2 = first_line_view.find(' ', space_pos1 + 1);
+  if (space_pos2 == std::string_view::npos) {
+    throw std::runtime_error("Invalid request format: Version not found");
+  }
+
+  std::string_view method_str = first_line_view.substr(0, space_pos1);
+  std::string_view version_str = first_line_view.substr(space_pos2 + 1);
+  std::string_view path_str =
+      first_line_view.substr(space_pos1 + 1, space_pos2 - space_pos1 - 1);
+
+  HTTP_METHOD method = method_string_to_enum(method_str);
+  if (method == HTTP::METHOD_NOT_SUPPORT) {
+    throw std::runtime_error("Unsupported HTTP method");
+  }
+  std::string version(version_str);
+  std::string path(path_str);
+
+  std::unique_ptr<HttpRequest> req =
+      std::make_unique<HttpRequest>(method, version, path);
+
+  // 解析头部
+  while (std::getline(iss, first_line)) {
+    if (first_line.empty()) {
+      break; // 遇到空行，结束头部解析，准备读取请求体
+    }
+
+    std::string_view line_view(first_line);
+    std::size_t colon_pos = line_view.find(':');
+    if (colon_pos == std::string_view::npos) {
+      continue;
+    }
+
+    std::string_view header_key = line_view.substr(0, colon_pos);
+    std::string_view header_value = ltrim(line_view.substr(
+        colon_pos + 1)); // 使用自行实现的 ltrim 函数去除前面的空白
+
+    HTTP_HEADER header_enum = header_string_to_enum(header_key);
+    if (header_enum != HTTP::HEADER_NOT_SUPPORT) {
+      req->add_header(header_enum, std::string(header_value));
+    }
+  }
+
+  // 读取请求体
+  std::stringstream requestBodyStream;
+  requestBodyStream << iss.rdbuf();
+  req->set_body(requestBodyStream.str());
+
+  return req;
+}
+
+} // namespace HTTP
+
+
+--- File: src/HttpRequest.cpp ---
+#include "HttpRequest.h"
+#include <string>
+#include <iostream>
+#include <sstream>
+
+
+
+--- File: src/ServerBase.cpp ---
+#include "ServerBase.h"
+#include <cstddef>
+#include <errno.h>
+#include <iostream>
+#include <netinet/in.h>
+#include <string.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
+// 初始化端口号
+ServerBase::ServerBase(int port) {
+  socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+  // Address Family 第一个参数 AF_INET 指定的是地址家族（Address
+  // Family），这属于传输层以下的网络层内容，表示使用的是 IPv4 地址格式。
+  // 第二个参数 SOCK_STREAM
+  // 表示使用的是面向连接的、提供可靠数据传输服务的传输层协议，具体就是指
+  // TCP（Transmission Control Protocol）。 第三个参数 0
+  // 表示不指定协议，系统会自动选择一个合适的协议。
+  if (socket_fd_ == -1) {
+    std::cout << "socket error" << std::endl;
+  }
+  // 这是在设置IP层的内容
+  this->server_addr_.sin_family =
+      AF_INET; // 这一行设置的是地址族（address family），这里的 AF_INET 表示
+               // Internet 地址簇，即 IPv4 协议。
+  this->server_addr_.sin_port = htons(port); // 设置端口号
+  this->server_addr_.sin_addr.s_addr =
+      INADDR_ANY; // 表示服务器将在本机的所有网络接口上监听连接请求，即它可以接收来自任意IP地址的连接请求。
+  bind_socket();  //绑定窗口
+  listen_socket(); // 这里要开始监听窗口
+  create_epoll();  // 创建epoll
+  // set epoll
+  event_.events =
+      EPOLLIN | EPOLLET; // 边沿触发：变化时触发 水平触发：缓冲区非空就触发
+  event_.data.fd = socket_fd_;
+  int ret = epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, socket_fd_, &event_);
+  if (ret == -1) {
+    std::cout << "epoll_ctl error" << std::endl;
+  }
+  background_thread_.emplace([&] { work_thread(); }); // 开启工作线程
+}
+void ServerBase::bind_socket() {
+  int ret = bind(socket_fd_, (struct sockaddr *)&this->server_addr_,
+                 sizeof(this->server_addr_));
+  if (ret == -1) {
+    std::cerr << "bind error: " << strerror(errno) << std::endl;
+  }
+}
+void ServerBase::listen_socket() {
+  int ret = listen(socket_fd_, 10);
+  if (ret == -1) {
+    std::cout << "listen error" << std::endl;
+  } // listen start
+}
+void ServerBase::accept_socket(struct sockaddr_in *client_addr) {
+  socklen_t len = sizeof(*client_addr);
+  int connfd = accept(socket_fd_, (struct sockaddr *)&client_addr, &len);
+  if (connfd == -1) {
+    std::cout << "accept error" << std::endl;
+  }
+}
+//
+void ServerBase::create_epoll() {
+  epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
+  if (epoll_fd_ == -1) {
+    std::cout << "create epoll error" << std::endl;
+  }
+}
+/*尽管你将client_sock传递给了handle_client函数处理，但在实际的服务器开发中，handle_client函数可能并不是一次性处理完与客户端的所有交互，
+而是需要在一段时间内持续接收客户端的数据或者发送数据给客户端。将客户端套接字添加到epoll中，可以让服务器在接收到客户端的读写事件时及时作出反应，
+而无需不断轮询或阻塞等待。*/
+void ServerBase::work_thread() {
+  while (!stop_work_) {
+    int ret = epoll_wait(epoll_fd_, events_, 10, -1);
+    if (ret == -1) {
+      std::cout << "epoll wait error" << std::endl;
+    } // 推测，这里不能else if
+    for (int i = 0; i < ret; ++i) {
+      // 判断事件类型
+      if (events_[i].data.fd == socket_fd_) {
+        sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        // accept4用来接受客户端信息，相比于标准的accept函数，accept4提供了一些额外的选项，可以在创建新套接字的同时设置特定的属性。
+        int client_sock = accept4(socket_fd_, (struct sockaddr *)&client_addr,
+                                  &addr_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        if (client_sock == -1) {
+          perror("Failed to accept new connection");
+          std::cerr << "Error code: " << errno
+                    << ", Error message: " << strerror(errno) << std::endl;
+          continue;
+        } else {
+          // 可以获得client的socket
+          client_socket_fds_.push_back(client_sock);
+          epoll_event client_event;
+          client_event.events =
+              EPOLLIN | EPOLLET; // 设置关注读事件，并假设使用边缘触发模式
+          client_event.data.fd = client_sock;
+          epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_sock,
+                    &client_event); // 添加对客户端socket的监听
+          handle_client(client_sock);
+        }
+      }
+    }
+  }
+}
+
+void ServerBase::handle_client(int client_sock) {
+  // 这里可以留一些外部标志来终止线程
+  handle_threads_.emplace_back([&] {
+    // 创建线程,这里可以处理客户端的请求
+    while (!stop_work_) {
+      char buf[BUF_SIZE];
+      int ret = recv(client_sock, buf, BUF_SIZE - 1, 0);
+      if (ret == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          // 在非阻塞模式下，资源暂时不可用是正常的，可以继续循环等待
+          continue;
+        } else {
+          perror("Failed to receive data");
+          break; // 出现其他错误则退出循环
+        }
+      }
+      if (ret == 0) {
+        // 客户端关闭连接
+        epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_sock, NULL);
+        close(client_sock);
+        break;
+      } else {
+        buf[ret] = '\0';
+        std::cout << "receive data: " << buf << std::endl;
+        break;
+      }
+    }
+  });
+}
+ServerBase::~ServerBase() {
+  stop_work_ = true;
+  std::cout << "ServerBase::~ServerBase()" << std::endl;
+  for (auto &x : handle_threads_) {
+    if (x.joinable()) {
+      x.join();
+    }
+  }
+  for (int &cl_socket : client_socket_fds_) {
+    epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, cl_socket, NULL);
+    close(cl_socket);
+  }
+  background_thread_->join();
+  epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, socket_fd_, NULL);
+
+  close(epoll_fd_);
+  close(socket_fd_);
+}
+
+
+--- File: src/main.cpp ---
+#include "ServerBase.h"
+# include <iostream>
+int main() {
+  std::cout<<" hello myserver"<<std::endl;
+  ServerBase server(8033);
+  // wait for client connection
+  // wait some time
+  std::this_thread::sleep_for(std::chrono::seconds(100));
+  return 0;
+}
+
+--- File: tests/CMakeLists.txt ---
+# tests/CMakeLists.txt
+cmake_minimum_required(VERSION 3.10)
+
+# 引入上级CMakeLists.txt中的项目名称与版本设置
+set(PROJECT_NAME ServerProject)
+project(${PROJECT_NAME}Tests)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+# 添加对主项目的依赖，包括它的头文件和库
+include_directories(${PROJECT_SOURCE_DIR}/include)
+aux_source_directory(${PROJECT_SOURCE_DIR}/src SRCLISTS)
+
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+)
+
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+
+
+add_executable(ThreadPool_test ThreadPool_test.cpp)
+add_executable(Factory_test HttpMessageFactory_test.cpp)
+
+target_link_libraries(ThreadPool_test PRIVATE gtest PRIVATE FAC_LIBS)
+target_link_libraries(Factory_test PRIVATE gtest)
+
+include(GoogleTest)
+gtest_discover_tests(ThreadPool_test Factory_test)
+
+
+--- File: tests/HttpMessageFactory_test.cpp ---
+#include "HttpBase.h"
+#include "HttpMessageFactory.h"
+#include <memory>
+
+#include "gtest/gtest.h"
+
+int main(int argc, char *argv[]) {
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
+std::unique_ptr<HTTP::HttpMessageFactory> HTTP::HttpMessageFactory::instance_{nullptr};
+
+TEST(HttpMessageFactory, createHttpRequest) {
+
+  std::string req_str = "GET / HTTP/1.1\r\n"
+                        "Host: www.example.com\r\n"
+                        "User-Agent: curl/7.51.0\r\n"
+                        "\r\n";
+  auto &factory = HTTP::HttpMessageFactory::getInstance();
+  factory->hello_func();
+  factory->hello_func1();
+  // auto req = factory->createHttpRequest(req_str);
+  // ASSERT_NO_THROW({
+  //   auto req = factory->createHttpRequest(req_str);
+  //   ASSERT_EQ(req->get_method(), HTTP::HTTP_METHOD::GET);
+  //   ASSERT_EQ(req->get_version(), "HTTP/1.1");
+  //   ASSERT_EQ(req->get_path(), "/");
+  //   ASSERT_EQ(req->get_header(HTTP::HTTP_HEADER::Host), "www.example.com");
+  //   ASSERT_EQ(req->get_header(HTTP::HTTP_HEADER::User_Agent), "curl/7.51.0");
+  //   ASSERT_TRUE(req->get_body().empty());
+  // });
+}
+
+TEST(HttpMessageFactory, createHttpRequestWithBody) {
+  std::string req_str = "POST / HTTP/1.1\r\n"
+                        "Host: www.example.com\r\n"
+                        "User-Agent: curl/7.51.0\r\n"
+                        "\r\n"
+                        "body content";
+  auto &factory = HTTP::HttpMessageFactory::getInstance();
+
+  // ASSERT_NO_THROW({
+  //   auto req = factory->createHttpRequest(req_str);
+  //   ASSERT_EQ(req->get_method(), HTTP::POST);
+  //   ASSERT_EQ(req->get_version(), "HTTP/1.1");
+  //   ASSERT_EQ(req->get_path(), "/");
+  //   ASSERT_EQ(req->get_header(HTTP::Host), "www.example.com");
+  //   ASSERT_EQ(req->get_header(HTTP::User_Agent), "curl/7.51.0");
+  //   ASSERT_EQ(req->get_body(), "body content");
+  // });
+}
+
+TEST(HttpMessageFactory, createHttpRequestWithBrokenBody) {
+  std::string req_str = "POST / HTTP/1.1\r\n"
+                        "Host: www.example.com\r\n"
+                        "User-Agent: curl/7.51.0\r\n"
+                        "\r\n"
+                        "body content\r\n"
+                        "\r\n"
+                        "another content";
+  auto &factory = HTTP::HttpMessageFactory::getInstance();
+
+  // ASSERT_NO_THROW({
+  //   auto req = factory->createHttpRequest(req_str);
+  //   ASSERT_EQ(req->get_method(), HTTP::POST);
+  //   ASSERT_EQ(req->get_version(), "HTTP/1.1");
+  //   ASSERT_EQ(req->get_path(), "/");
+  //   ASSERT_EQ(req->get_header(HTTP::Host), "www.example.com");
+  //   ASSERT_EQ(req->get_header(HTTP::User_Agent), "curl/7.51.0");
+  //   ASSERT_EQ(req->get_body(), "body content\r\nanother content");
+  // });
+}
+
+
+--- File: tests/ThreadPool_test.cpp ---
+#include <gtest/gtest.h>
+
+#include <future>
+
+#include <iostream>
+#include <vector>
+
+#include "ThreadPool.h"
+
+int main(int argc, char *argv[]) {
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
+
+int multiply(const int a, const int b)
+{
+  return a * b;
+}
+
+TEST(ThreadPool, testSubmit) {
+  ThreadPool pool(3);
+
+  // 初始化线程池
+  std::vector<std::future<int>> outputs;
+  std::vector<int> assume_outputs;
+  // 提交乘法操作，总共30个
+  outputs.reserve(300);
+  assume_outputs.reserve(300);
+  for (int i = 1; i <= 3; ++i)
+    for (int j = 1; j <= 100; ++j) {
+      outputs.push_back(pool.submit(multiply, i, j));
+      assume_outputs.push_back(i * j);
+    }
+  for(int i = 0; i < outputs.size(); ++i)
+    EXPECT_EQ(outputs[i].get(), assume_outputs[i]);
+}
+
+TEST(ThreadPool, testSubmit2) {
+  int ret = 0;
+  std::promise<int> prom;
+  auto future = prom.get_future();
+  ThreadPool pool(1);
+  pool.submit([&prom](int x) { prom.set_value(x); }, ret);
+  future.wait();
+  EXPECT_EQ(future.get(), ret);
+}
+
+TEST(ThreadPool, testSubmitQueueFull) {
+  ThreadPool pool(1);
+
+  std::vector<std::future<int>> futures;
+  for (int i = 0; i < 100; ++i) {
+    futures.push_back(pool.submit([i]() { return i; }));
+  }
+  for (int i = 0; i < 100; ++i) {
+    EXPECT_EQ(futures[i].get(), i);
+  }
+}

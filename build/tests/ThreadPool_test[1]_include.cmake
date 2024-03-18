@@ -1,0 +1,5 @@
+if(EXISTS "/home/hao/Myweb/build/tests/ThreadPool_test[1]_tests.cmake")
+  include("/home/hao/Myweb/build/tests/ThreadPool_test[1]_tests.cmake")
+else()
+  add_test(ThreadPool_test_NOT_BUILT ThreadPool_test_NOT_BUILT)
+endif()

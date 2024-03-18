@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "name": "C/C++: clang++ 调试活动文件",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/test/${fileBasenameNoExtension}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            
+            "miDebuggerPath": "/home/hao/lldb-mi/lldb-mi-main/build/src/lldb-mi"
+            
+        }
+    ]
+}

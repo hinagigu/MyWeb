@@ -1,0 +1,8 @@
+build
+.cache
+docs
+mywebtest
+.project_structure_filter
+.project_structure_ignore
+thirdparty
+.vscode

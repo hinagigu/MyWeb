@@ -1,0 +1,17 @@
+{
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "testpool",
+            "command": "../",
+            "args": [
+                "build/tests/pooltest"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+        },
+    ],
+    
+    "version": "2.0.0"
+}

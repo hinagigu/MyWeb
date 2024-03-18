@@ -1,0 +1,7 @@
+add_test( ThreadPool.testSubmit /home/hao/Myweb/build/tests/ThreadPool_test [==[--gtest_filter=ThreadPool.testSubmit]==] --gtest_also_run_disabled_tests)
+set_tests_properties( ThreadPool.testSubmit PROPERTIES WORKING_DIRECTORY /home/hao/Myweb/build/tests SKIP_REGULAR_EXPRESSION [==[\[  SKIPPED \]]==])
+add_test( ThreadPool.testSubmit2 /home/hao/Myweb/build/tests/ThreadPool_test [==[--gtest_filter=ThreadPool.testSubmit2]==] --gtest_also_run_disabled_tests)
+set_tests_properties( ThreadPool.testSubmit2 PROPERTIES WORKING_DIRECTORY /home/hao/Myweb/build/tests SKIP_REGULAR_EXPRESSION [==[\[  SKIPPED \]]==])
+add_test( ThreadPool.testSubmitQueueFull /home/hao/Myweb/build/tests/ThreadPool_test [==[--gtest_filter=ThreadPool.testSubmitQueueFull]==] --gtest_also_run_disabled_tests)
+set_tests_properties( ThreadPool.testSubmitQueueFull PROPERTIES WORKING_DIRECTORY /home/hao/Myweb/build/tests SKIP_REGULAR_EXPRESSION [==[\[  SKIPPED \]]==])
+set( ThreadPool_test_TESTS ThreadPool.testSubmit ThreadPool.testSubmit2 ThreadPool.testSubmitQueueFull)
